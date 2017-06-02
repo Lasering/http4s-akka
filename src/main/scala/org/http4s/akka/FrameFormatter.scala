@@ -2,6 +2,7 @@ package org.http4s.akka
 
 import io.circe.{Decoder, Encoder, Json}
 import io.circe.parser._
+import org.http4s.{Charset, DefaultCharset, UrlForm}
 import org.http4s.websocket.WebsocketBits._
 import play.twirl.api._
 
@@ -27,42 +28,45 @@ trait FrameFormatter[A] { top =>
   * Defaults frame formatters.
   */
 object FrameFormatter {
-  /** String WebSocket frames. */
-  implicit val stringFrame: FrameFormatter[String] = new FrameFormatter[String] {
+  implicit val stringFrameFormatter: FrameFormatter[String] = new FrameFormatter[String] {
     def toFrame(text: String): WebSocketFrame = Text(text)
     lazy val fromFrameDefinedFor: String = Text.getClass.getSimpleName
     def fromFrame(frame: WebSocketFrame): Option[String] = Option(frame) collect {
       case Text(text, _) => text
     }
   }
-  /** Array[Byte] WebSocket frames. */
-  implicit val byteArrayFrame: FrameFormatter[Array[Byte]] = new FrameFormatter[Array[Byte]] {
+  implicit val byteArrayFrameFormatter: FrameFormatter[Array[Byte]] = new FrameFormatter[Array[Byte]] {
     def toFrame(bytes: Array[Byte]): WebSocketFrame = Binary(bytes)
     lazy val fromFrameDefinedFor: String = Binary.getClass.getSimpleName
     def fromFrame(frame: WebSocketFrame): Option[Array[Byte]] = Option(frame) collect {
       case Binary(bytes, _) => bytes
     }
   }
+  implicit def urlFormFrameFormatter(implicit charset: Charset = DefaultCharset): FrameFormatter[UrlForm] = {
+    stringFrameFormatter.transform[UrlForm](
+      UrlForm.encodeString(charset)(_),
+      UrlForm.decodeString(charset)(_).toEither.toTry.get
+    )
+  }
   
   //=== CIRCE ===
-  
   /** Json WebSocket frames. */
-  implicit val jsonFrame: FrameFormatter[Json] = {
-    stringFrame.transform(_.noSpaces, s => parse(s) match {
+  implicit val jsonFrameFormatter: FrameFormatter[Json] = {
+    stringFrameFormatter.transform(_.noSpaces, s => parse(s) match {
       case Right(json) => json
       case Left(parsingFailure) =>
         throw parsingFailure.copy(message = s"${parsingFailure.message} for input\n$s")
     })
   }
   /** Json WebSocket frames, parsed into/formatted from objects of type A. */
-  implicit def aWithCirceEncoderDecoderFrame[A: Encoder : Decoder]: FrameFormatter[A] = jsonFrame.transform[A](
+  implicit def circeableFrameFormat[A: Encoder : Decoder]: FrameFormatter[A] = jsonFrameFormatter.transform[A](
     Encoder[A].apply(_),
     Decoder[A].decodeJson(_).toTry.get
   )
   
   //=== TWIRL ===
-  implicit val htmlFrame: FrameFormatter[Html] = stringFrame.transform(_.body, Html.apply)
-  implicit val xmlFrame: FrameFormatter[Xml] = stringFrame.transform(_.body, Xml.apply)
-  implicit val txtFrame: FrameFormatter[Txt] = stringFrame.transform(_.body, Txt.apply)
-  implicit val javaScriptFrame: FrameFormatter[JavaScript] = stringFrame.transform(_.body, JavaScript.apply)
+  implicit val htmlFrameFormatter: FrameFormatter[Html] = stringFrameFormatter.transform(_.body, Html.apply)
+  implicit val xmlFrameFormatter: FrameFormatter[Xml] = stringFrameFormatter.transform(_.body, Xml.apply)
+  implicit val txtFrameFormatter: FrameFormatter[Txt] = stringFrameFormatter.transform(_.body, Txt.apply)
+  implicit val javaScriptFrameFormatter: FrameFormatter[JavaScript] = stringFrameFormatter.transform(_.body, JavaScript.apply)
 }
