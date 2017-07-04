@@ -45,7 +45,7 @@ object FrameFormatter {
   implicit def urlFormFrameFormatter(implicit charset: Charset = DefaultCharset): FrameFormatter[UrlForm] = {
     stringFrameFormatter.transform[UrlForm](
       UrlForm.encodeString(charset)(_),
-      UrlForm.decodeString(charset)(_).toEither.toTry.get
+      UrlForm.decodeString(charset)(_).toTry.get
     )
   }
   

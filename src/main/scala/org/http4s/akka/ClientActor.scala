@@ -1,21 +1,26 @@
 package org.http4s.akka
 
 import scala.reflect.ClassTag
-import scalaz.stream.async.mutable.Queue
 
 import akka.actor.SupervisorStrategy.Stop
 import akka.actor.{Actor, OneForOneStrategy, Props, Terminated}
+import fs2.Task
+import fs2.async.mutable.{Queue, Signal}
 
-private class ClientActor[Out](props: Props, outQueue: Queue[Out])(implicit messageType: ClassTag[Out]) extends Actor {
+private class ClientActor[Out](props: Props, outQueue: Queue[Task, Out], closeSignal: Signal[Task, Boolean])
+                              (implicit messageType: ClassTag[Out]) extends Actor {
   val serverActor = context actorOf props
   context watch serverActor
   
   def receive: Receive = {
     case Terminated(`serverActor`) =>
-      outQueue.close.unsafePerformSync
+      closeSignal.set(true).unsafeRun()
       context stop self
     case messageType(m) if sender() == serverActor =>
-      outQueue.enqueueOne(m).unsafePerformSync
+      outQueue.enqueue1(m).unsafeRun()
+    case m if sender() == serverActor =>
+      org.log4s.getLogger.error(s"Server sent unhandled message ${m.getClass.getSimpleName} " +
+        s"expecting a ${messageType.runtimeClass.getSimpleName}!")
     case m if sender() == self =>
       serverActor ! m
   }
